@@ -24,9 +24,9 @@ func NewPatchModifier(log *logrus.Entry) (*PatchModifier, error) {
 	}, nil
 }
 
-// ModifyPatchForHunk takes the original patch, which may contain several hunks,
+// ObtainPatchForHunk takes the original patch, which may contain several hunks,
 // and removes any hunks that aren't the selected hunk
-func (p *PatchModifier) ModifyPatchForHunk(patch string, hunkStarts []int, currentLine int) (string, error) {
+func (p *PatchModifier) ObtainPatchForHunk(patch string, hunkStarts []int, currentLine int) (string, error) {
 	// get hunk start and end
 	lines := strings.Split(patch, "\n")
 	hunkStartIndex := utils.PrevIndex(hunkStarts, currentLine)
@@ -59,9 +59,9 @@ func (p *PatchModifier) getHeaderLength(patchLines []string) (int, error) {
 	return 0, errors.New(p.Tr.SLocalize("CantFindHunks"))
 }
 
-// ModifyPatchForLine takes the original patch, which may contain several hunks,
-// and the line number of the line we want to stage
-func (p *PatchModifier) ModifyPatchForLine(patch string, lineNumber int) (string, error) {
+// ObtainPatchForLine takes the original patch, which may contain several hunks,
+// and the line number of the line we want to stage, and returns a new patch which only adds the selected line
+func (p *PatchModifier) ObtainPatchForLine(patch string, lineNumber int) (string, error) {
 	lines := strings.Split(patch, "\n")
 	headerLength, err := p.getHeaderLength(lines)
 	if err != nil {
@@ -74,7 +74,32 @@ func (p *PatchModifier) ModifyPatchForLine(patch string, lineNumber int) (string
 		return "", err
 	}
 
-	hunk, err := p.getModifiedHunk(lines, hunkStart, lineNumber)
+	hunk, err := p.getModifiedHunkForSingleLine(lines, hunkStart, lineNumber)
+	if err != nil {
+		return "", err
+	}
+
+	output += strings.Join(hunk, "\n")
+
+	return output, nil
+}
+
+// ObtainPatchForHunkWithoutLine takes the original patch, which may contain several hunks,
+// and the line number of the line we care about, and returns a patch containing the hunk without that line.
+func (p *PatchModifier) ObtainPatchForHunkWithoutLine(patch string, lineNumber int) (string, error) {
+	lines := strings.Split(patch, "\n")
+	headerLength, err := p.getHeaderLength(lines)
+	if err != nil {
+		return "", err
+	}
+	output := strings.Join(lines[0:headerLength], "\n") + "\n"
+
+	hunkStart, err := p.getHunkStart(lines, lineNumber)
+	if err != nil {
+		return "", err
+	}
+
+	hunk, err := p.getModifiedHunkForRemovedLine(lines, hunkStart, lineNumber)
 	if err != nil {
 		return "", err
 	}
@@ -101,7 +126,7 @@ func (p *PatchModifier) getHunkStart(patchLines []string, lineNumber int) (int, 
 	return 0, errors.New(p.Tr.SLocalize("CantFindHunk"))
 }
 
-func (p *PatchModifier) getModifiedHunk(patchLines []string, hunkStart int, lineNumber int) ([]string, error) {
+func (p *PatchModifier) getModifiedHunkForSingleLine(patchLines []string, hunkStart int, lineNumber int) ([]string, error) {
 	lineChanges := 0
 	// strip the hunk down to just the line we want to stage
 	newHunk := []string{patchLines[hunkStart]}
@@ -115,12 +140,12 @@ func (p *PatchModifier) getModifiedHunk(patchLines []string, hunkStart int, line
 			// we include other removals but treat them like context
 			if strings.HasPrefix(line, "-") {
 				newHunk = append(newHunk, " "+line[1:])
-				lineChanges += 1
+				lineChanges++
 				continue
 			}
 			// we don't include other additions
 			if strings.HasPrefix(line, "+") {
-				lineChanges -= 1
+				lineChanges--
 				continue
 			}
 		}
@@ -134,6 +159,63 @@ func (p *PatchModifier) getModifiedHunk(patchLines []string, hunkStart int, line
 	}
 
 	return newHunk, nil
+}
+
+// this returns a patch containing all lines in a patch but the selected one
+func (p *PatchModifier) getModifiedHunkForRemovedLine(patchLines []string, hunkStart int, lineNumber int) ([]string, error) {
+	lineChanges := 0
+	// strip the hunk down to just the line we want to stage
+	newHunk := []string{patchLines[hunkStart]}
+	lastRemovedIndex := -1
+	for offsetIndex, line := range patchLines[hunkStart+1:] {
+		index := offsetIndex + hunkStart + 1
+		if strings.HasPrefix(line, "@@") {
+			newHunk = append(newHunk, "\n")
+			break
+		}
+		if index == lineNumber {
+			// we include other removals but treat them like context
+			if strings.HasPrefix(line, "-") {
+				lastRemovedIndex = index
+				newHunk = append(newHunk, " "+line[1:])
+				lineChanges++
+				continue
+			}
+			// we don't include other additions
+			if strings.HasPrefix(line, "+") {
+				lineChanges--
+				continue
+			}
+		} else {
+			if strings.HasPrefix(line, `\`) && lastRemovedIndex == index-1 {
+				// do nothing
+			}
+		}
+		newHunk = append(newHunk, line)
+	}
+
+	var err error
+	newHunk[0], err = p.updatedHeader(newHunk[0], lineChanges)
+	if err != nil {
+		return nil, err
+	}
+
+	return newHunk, nil
+}
+
+// after making changes to a hunk, sometimes it ends up empty. This tells us whether a hunk has any changes
+func (p *PatchModifier) HunkPatchIsEmpty(patch string) bool {
+	pastHeader := false
+	for _, line := range strings.Split(patch, "\n") {
+		if strings.HasPrefix(line, "@@") {
+			pastHeader = true
+			continue
+		}
+		if pastHeader && (strings.HasPrefix(line, "-") || strings.HasPrefix(line, "+")) {
+			return false
+		}
+	}
+	return true
 }
 
 // updatedHeader returns the hunk header with the updated line range

@@ -490,6 +490,12 @@ func addEnglish(i18nObject *i18n.Bundle) error {
 			ID:    "StageLine",
 			Other: `stage line`,
 		}, &i18n.Message{
+			ID:    "ResetHunk",
+			Other: `reset hunk`,
+		}, &i18n.Message{
+			ID:    "ResetLine",
+			Other: `reset line`,
+		}, &i18n.Message{
 			ID:    "EscapeStaging",
 			Other: `return to files panel`,
 		}, &i18n.Message{

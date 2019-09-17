@@ -194,9 +194,9 @@ func (gui *Gui) handleStageLineOrHunk(hunk bool) error {
 	currentLine := state.StageableLines[state.SelectedLine]
 	var patch string
 	if hunk {
-		patch, err = p.ModifyPatchForHunk(state.Diff, state.HunkStarts, currentLine)
+		patch, err = p.ObtainPatchForHunk(state.Diff, state.HunkStarts, currentLine)
 	} else {
-		patch, err = p.ModifyPatchForLine(state.Diff, currentLine)
+		patch, err = p.ObtainPatchForLine(state.Diff, currentLine)
 	}
 	if err != nil {
 		return err
@@ -207,9 +207,80 @@ func (gui *Gui) handleStageLineOrHunk(hunk bool) error {
 
 	// apply the patch then refresh this panel
 	// create a new temp file with the patch, then call git apply with that patch
-	_, err = gui.GitCommand.ApplyPatch(patch)
+	_, err = gui.GitCommand.ApplyPatch(patch, false, true)
 	if err != nil {
 		return err
+	}
+
+	if err := gui.refreshFiles(); err != nil {
+		return err
+	}
+	if err := gui.refreshStagingPanel(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (gui *Gui) handleResetHunk(g *gocui.Gui, v *gocui.View) error {
+	return gui.handleResetLineOrHunk(true)
+}
+
+func (gui *Gui) handleResetLine(g *gocui.Gui, v *gocui.View) error {
+	return gui.handleResetLineOrHunk(false)
+}
+
+// strategy is to obtain the patch without the selected line, then apply the original patch in reverse, then apply the
+// 1) get the hunk
+// 2) remove the line from it
+// 3) apply the original hunk in reverse
+// 4) apply the new hunk
+// 5) if failure, apply the original hunk again
+
+func (gui *Gui) handleResetLineOrHunk(hunk bool) error {
+	state := gui.State.Panels.Staging
+	p, err := git.NewPatchModifier(gui.Log)
+	if err != nil {
+		return err
+	}
+
+	currentLine := state.StageableLines[state.SelectedLine]
+
+	hunkPatch, err := p.ObtainPatchForHunk(state.Diff, state.HunkStarts, currentLine)
+	if err != nil {
+		return err
+	}
+
+	patchWithoutLine, err := p.ObtainPatchForHunkWithoutLine(state.Diff, currentLine)
+	if err != nil {
+		return err
+	}
+	emptyPatch := p.HunkPatchIsEmpty(patchWithoutLine)
+
+	// apply patch in reverse
+	_, err = gui.GitCommand.ApplyPatch(hunkPatch, true, false)
+	if err != nil {
+		return err
+	}
+
+	if !hunk && !emptyPatch {
+		// apply patch that is missing the line we want reset
+		gui.Log.Warn(patchWithoutLine)
+		_, err = gui.GitCommand.ApplyPatch(patchWithoutLine, false, false)
+		if err != nil {
+			// TODO: test for an error here
+
+			theErr := err
+
+			// something went wrong, let's roll back the previously applied patch
+			_, err = gui.GitCommand.ApplyPatch(hunkPatch, false, false)
+			if err != nil {
+				return err
+			}
+
+			panic(theErr)
+
+			return err
+		}
 	}
 
 	if err := gui.refreshFiles(); err != nil {

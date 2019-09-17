@@ -605,7 +605,7 @@ func (c *GitCommand) Diff(file *File, plain bool) string {
 	return s
 }
 
-func (c *GitCommand) ApplyPatch(patch string) (string, error) {
+func (c *GitCommand) ApplyPatch(patch string, reverse bool, cached bool) (string, error) {
 	filename, err := c.OSCommand.CreateTempFile("patch", patch)
 	if err != nil {
 		c.Log.Error(err)
@@ -614,7 +614,18 @@ func (c *GitCommand) ApplyPatch(patch string) (string, error) {
 
 	defer func() { _ = c.OSCommand.Remove(filename) }()
 
-	return c.OSCommand.RunCommandWithOutput(fmt.Sprintf("git apply --cached %s", c.OSCommand.Quote(filename)))
+	// for now we assume if you want it reversed, you're
+	reverseFlag := ""
+	if reverse {
+		reverseFlag = "--reverse"
+	}
+
+	cachedFlag := ""
+	if cached {
+		cachedFlag = "--cached"
+	}
+
+	return c.OSCommand.RunCommandWithOutput(fmt.Sprintf("git apply %s %s %s", cachedFlag, reverseFlag, c.OSCommand.Quote(filename)))
 }
 
 func (c *GitCommand) FastForward(branchName string) error {

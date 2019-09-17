@@ -677,6 +677,18 @@ func (gui *Gui) GetContextMap() map[string]map[string][]*Binding {
 					Description: gui.Tr.SLocalize("StageLine"),
 				}, {
 					ViewName:    "main",
+					Key:         'd',
+					Modifier:    gocui.ModNone,
+					Handler:     gui.handleResetLine,
+					Description: gui.Tr.SLocalize("ResetLine"),
+				}, {
+					ViewName:    "main",
+					Key:         'D',
+					Modifier:    gocui.ModNone,
+					Handler:     gui.handleResetHunk,
+					Description: gui.Tr.SLocalize("ResetHunk"),
+				}, {
+					ViewName:    "main",
 					Key:         'a',
 					Modifier:    gocui.ModNone,
 					Handler:     gui.handleStageHunk,
